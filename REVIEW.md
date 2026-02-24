@@ -1,4 +1,7 @@
-## Problemas críticos
+## Problemas de críticos a menor prioridad
+
+#### Fallo en contraseñas incorrectas
+Problema: El readme del respositorio dice que todos los usuarios tendrán la contraseña `password123`, pero esto no es validado en el login y acepta cualquier combinación de letras o números. Este error fue encontrado pero no modificado por el contexto de ser una desafío técnico, además de estás explicito en LoginHandler de tasks.go.
 
 ### Iniciar proyecto
 Problema: El levantamiento del proyecto está incorrecto, porque el archivo init.sql contiene error con columnas UUID. Crea un tabla con UUID y luego al insertar los datos en la base de datos, los UUID no son validos, lo que evita poder levantar el proyecto. Esto es un problema criticos para el equipo pueda revisar el proyecto
