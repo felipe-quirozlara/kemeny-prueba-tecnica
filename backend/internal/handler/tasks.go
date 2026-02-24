@@ -56,11 +56,11 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		ORDER BY tasks.created_at DESC`
 	}
 
-	rows, err := db.Pool.Query(r.Context(), query, args...)
-	if err != nil {
-		http.Error(w, `{"error": "failed to query tasks"}`, http.StatusInternalServerError)
-		return
-	}
+    rows, err := db.Pool.Query(r.Context(), query, args...)
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to query tasks", err, 0)
+        return
+    }
 	defer rows.Close()
 
 	taskMap := make(map[string]*model.Task)
@@ -121,8 +121,9 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks)
+    if err := JSON(w, http.StatusOK, tasks); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode tasks", err, 0)
+    }
 }
 
 // GetTask returns a single task by ID with full details.
@@ -142,14 +143,14 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 
-	if err == pgx.ErrNoRows {
-		http.Error(w, `{"error": "task not found"}`, http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		http.Error(w, `{"error": "failed to get task"}`, http.StatusInternalServerError)
-		return
-	}
+    if err == pgx.ErrNoRows {
+        Error(w, r, http.StatusNotFound, "task not found", nil, 0)
+        return
+    }
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get task", err, 0)
+        return
+    }
 
 	// Load creator
 	var creator model.User
@@ -184,51 +185,52 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(t)
+    if err := JSON(w, http.StatusOK, t); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode task", err, 0)
+    }
 }
 
 // CreateTask creates a new task.
 func CreateTask(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
-	if userID == "" {
-		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
+    if userID == "" {
+        Error(w, r, http.StatusUnauthorized, "unauthorized", nil, 0)
+        return
+    }
 
 	var req model.CreateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "invalid request body"}`, http.StatusBadRequest)
-		return
-	}
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        Error(w, r, http.StatusBadRequest, "invalid request body", err, 0)
+        return
+    }
 
-	if req.Title == "" {
-		http.Error(w, `{"error": "title is required"}`, http.StatusBadRequest)
-		return
-	}
+    if req.Title == "" {
+        Error(w, r, http.StatusBadRequest, "title is required", nil, 0)
+        return
+    }
 
-	if len(req.Title) > 500 {
-		http.Error(w, `{"error": "title too long"}`, http.StatusBadRequest)
-		return
-	}
+    if len(req.Title) > 500 {
+        Error(w, r, http.StatusBadRequest, "title too long", nil, 0)
+        return
+    }
 
 	validStatuses := map[string]bool{"todo": true, "in_progress": true, "review": true, "done": true}
 	if req.Status == "" {
 		req.Status = "todo"
 	}
-	if !validStatuses[req.Status] {
-		http.Error(w, `{"error": "invalid status"}`, http.StatusBadRequest)
-		return
-	}
+    if !validStatuses[req.Status] {
+        Error(w, r, http.StatusBadRequest, "invalid status", nil, 0)
+        return
+    }
 
 	validPriorities := map[string]bool{"low": true, "medium": true, "high": true, "urgent": true}
 	if req.Priority == "" {
 		req.Priority = "medium"
 	}
-	if !validPriorities[req.Priority] {
-		http.Error(w, `{"error": "invalid priority"}`, http.StatusBadRequest)
-		return
-	}
+    if !validPriorities[req.Priority] {
+        Error(w, r, http.StatusBadRequest, "invalid priority", nil, 0)
+        return
+    }
 
 	// Validate assignee exists if provided
 	if req.AssigneeID != nil && *req.AssigneeID != "" {
@@ -236,20 +238,20 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		err := db.Pool.QueryRow(r.Context(),
 			"SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", *req.AssigneeID,
 		).Scan(&exists)
-		if err != nil || !exists {
-			http.Error(w, `{"error": "assignee not found"}`, http.StatusBadRequest)
-			return
-		}
+        if err != nil || !exists {
+            Error(w, r, http.StatusBadRequest, "assignee not found", err, 0)
+            return
+        }
 	}
 
 	// Parse due date if provided
 	var dueDate *time.Time
 	if req.DueDate != nil && *req.DueDate != "" {
 		parsed, err := time.Parse(time.RFC3339, *req.DueDate)
-		if err != nil {
-			http.Error(w, `{"error": "invalid due_date format, use RFC3339"}`, http.StatusBadRequest)
-			return
-		}
+        if err != nil {
+            Error(w, r, http.StatusBadRequest, "invalid due_date format, use RFC3339", err, 0)
+            return
+        }
 		dueDate = &parsed
 	}
 
@@ -266,15 +268,15 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 
-	if err != nil {
-		log.Printf("error creating task: %v", err)
-		http.Error(w, `{"error": "failed to create task"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        log.Printf("error creating task: %v", err)
+        Error(w, r, http.StatusInternalServerError, "failed to create task", err, 0)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(task)
+    if err := JSON(w, http.StatusCreated, task); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode created task", err, 0)
+    }
 }
 
 // UpdateTask updates an existing task.
@@ -282,10 +284,10 @@ func UpdateTask(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "id")
 
 	var req model.UpdateTaskRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "invalid request body"}`, http.StatusBadRequest)
-		return
-	}
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        Error(w, r, http.StatusBadRequest, "invalid request body", err, 0)
+        return
+    }
 
 	// Fetch current task state
 	var existing model.Task
@@ -299,14 +301,14 @@ func UpdateTask(w http.ResponseWriter, r *http.Request) {
 		&existing.DueDate, &existing.EstimatedHours, &existing.ActualHours,
 	)
 
-	if err == pgx.ErrNoRows {
-		http.Error(w, `{"error": "task not found"}`, http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		http.Error(w, `{"error": "failed to get task"}`, http.StatusInternalServerError)
-		return
-	}
+    if err == pgx.ErrNoRows {
+        Error(w, r, http.StatusNotFound, "task not found", nil, 0)
+        return
+    }
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get task", err, 0)
+        return
+    }
 
 	// Build update fields
 	if req.Title != nil {
@@ -317,18 +319,18 @@ func UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Status != nil {
 		validStatuses := map[string]bool{"todo": true, "in_progress": true, "review": true, "done": true}
-		if !validStatuses[*req.Status] {
-			http.Error(w, `{"error": "invalid status"}`, http.StatusBadRequest)
-			return
-		}
+        if !validStatuses[*req.Status] {
+            Error(w, r, http.StatusBadRequest, "invalid status", nil, 0)
+            return
+        }
 		existing.Status = *req.Status
 	}
 	if req.Priority != nil {
 		validPriorities := map[string]bool{"low": true, "medium": true, "high": true, "urgent": true}
-		if !validPriorities[*req.Priority] {
-			http.Error(w, `{"error": "invalid priority"}`, http.StatusBadRequest)
-			return
-		}
+        if !validPriorities[*req.Priority] {
+            Error(w, r, http.StatusBadRequest, "invalid priority", nil, 0)
+            return
+        }
 		existing.Priority = *req.Priority
 	}
 	if req.AssigneeID != nil {
@@ -375,13 +377,14 @@ func UpdateTask(w http.ResponseWriter, r *http.Request) {
 		&updated.CreatedAt, &updated.UpdatedAt,
 	)
 
-	if err != nil {
-		http.Error(w, `{"error": "failed to retrieve updated task"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to retrieve updated task", err, 0)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updated)
+    if err := JSON(w, http.StatusOK, updated); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode updated task", err, 0)
+    }
 }
 
 // DeleteTask deletes a task by ID.
@@ -392,15 +395,15 @@ func DeleteTask(w http.ResponseWriter, r *http.Request) {
 		"DELETE FROM tasks WHERE id = $1", taskID,
 	)
 
-	if err != nil {
-		http.Error(w, `{"error": "failed to delete task"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to delete task", err, 0)
+        return
+    }
 
-	if result.RowsAffected() == 0 {
-		http.Error(w, `{"error": "task not found"}`, http.StatusNotFound)
-		return
-	}
+    if result.RowsAffected() == 0 {
+        Error(w, r, http.StatusNotFound, "task not found", nil, 0)
+        return
+    }
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -409,13 +412,13 @@ func DeleteTask(w http.ResponseWriter, r *http.Request) {
 func GetTaskHistory(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "id")
 
-	rows, err := db.Pool.Query(r.Context(),
-		`SELECT id, task_id, user_id, field_name, old_value, new_value, edited_at
-		 FROM edit_history WHERE task_id = $1 ORDER BY edited_at DESC`, taskID)
-	if err != nil {
-		http.Error(w, `{"error": "failed to get history"}`, http.StatusInternalServerError)
-		return
-	}
+    rows, err := db.Pool.Query(r.Context(),
+        `SELECT id, task_id, user_id, field_name, old_value, new_value, edited_at
+         FROM edit_history WHERE task_id = $1 ORDER BY edited_at DESC`, taskID)
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get history", err, 0)
+        return
+    }
 	defer rows.Close()
 
 	history := []model.EditHistory{}
@@ -425,17 +428,18 @@ func GetTaskHistory(w http.ResponseWriter, r *http.Request) {
 		history = append(history, h)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+    if err := JSON(w, http.StatusOK, history); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode history", err, 0)
+    }
 }
 
 // SearchTasks searches tasks by title or description.
 func SearchTasks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	if q == "" {
-		http.Error(w, `{"error": "query parameter q is required"}`, http.StatusBadRequest)
-		return
-	}
+    if q == "" {
+        Error(w, r, http.StatusBadRequest, "query parameter q is required", nil, 0)
+        return
+    }
 
 	searchTerm := "%" + strings.ToLower(q) + "%"
 
@@ -448,10 +452,10 @@ func SearchTasks(w http.ResponseWriter, r *http.Request) {
 		 ORDER BY created_at DESC`,
 		searchTerm,
 	)
-	if err != nil {
-		http.Error(w, `{"error": "search failed"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "search failed", err, 0)
+        return
+    }
 	defer rows.Close()
 
 	tasks := []model.Task{}
@@ -469,8 +473,9 @@ func SearchTasks(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, t)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tasks)
+    if err := JSON(w, http.StatusOK, tasks); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode search results", err, 0)
+    }
 }
 
 // GetDashboardStats returns summary statistics for the dashboard.
@@ -488,17 +493,17 @@ func GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 
 	// Total
 	err := db.Pool.QueryRow(r.Context(), "SELECT COUNT(*) FROM tasks").Scan(&stats.TotalTasks)
-	if err != nil {
-		http.Error(w, `{"error": "failed to get stats"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get stats", err, 0)
+        return
+    }
 
 	// By status
 	rows, err := db.Pool.Query(r.Context(), "SELECT status, COUNT(*) FROM tasks GROUP BY status")
-	if err != nil {
-		http.Error(w, `{"error": "failed to get stats"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get stats", err, 0)
+        return
+    }
 	defer rows.Close()
 	for rows.Next() {
 		var status string
@@ -509,10 +514,10 @@ func GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 
 	// By priority
 	rows2, err := db.Pool.Query(r.Context(), "SELECT priority, COUNT(*) FROM tasks GROUP BY priority")
-	if err != nil {
-		http.Error(w, `{"error": "failed to get stats"}`, http.StatusInternalServerError)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get stats", err, 0)
+        return
+    }
 	defer rows2.Close()
 	for rows2.Next() {
 		var priority string
@@ -526,8 +531,9 @@ func GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 		"SELECT COUNT(*) FROM tasks WHERE due_date < NOW() AND status != 'done'",
 	).Scan(&stats.OverdueTasks)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+    if err := JSON(w, http.StatusOK, stats); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode stats", err, 0)
+    }
 }
 
 // LoginHandler handles user authentication and returns a JWT token.
@@ -537,10 +543,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error": "invalid request"}`, http.StatusBadRequest)
-		return
-	}
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        Error(w, r, http.StatusBadRequest, "invalid request", err, 0)
+        return
+    }
 
 	var user model.User
 	err := db.Pool.QueryRow(r.Context(),
@@ -548,10 +554,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		req.Email,
 	).Scan(&user.ID, &user.Email, &user.Name, &user.PasswordHash, &user.Role)
 
-	if err != nil {
-		http.Error(w, `{"error": "invalid credentials"}`, http.StatusUnauthorized)
-		return
-	}
+    if err != nil {
+        Error(w, r, http.StatusUnauthorized, "invalid credentials", err, 0)
+        return
+    }
 
 	// NOTE: In a real app, we'd use bcrypt.CompareHashAndPassword here.
 	// For the assessment, we accept any password for seeded users.
@@ -565,20 +571,21 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
         "exp": time.Now().Add(24 * time.Hour).Unix(),
     })
 
-	tokenString, err := token.SignedString(jwtSecret)
-	if err != nil {
-		http.Error(w, `{"error": "failed to generate token"}`, http.StatusInternalServerError)
-		return
-	}
+    tokenString, err := token.SignedString(jwtSecret)
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to generate token", err, 0)
+        return
+    }
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"token": tokenString,
-		"user": map[string]string{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
-			"role":  user.Role,
-		},
-	})
+    if err := JSON(w, http.StatusOK, map[string]interface{}{
+        "token": tokenString,
+        "user": map[string]string{
+            "id":    user.ID,
+            "email": user.Email,
+            "name":  user.Name,
+            "role":  user.Role,
+        },
+    }); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to encode token response", err, 0)
+    }
 }
