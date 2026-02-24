@@ -133,6 +133,7 @@ curl http://localhost:8080/api/tasks/11111111-1111-1111-1111-111111111111 \
 ## Reglas
 
 - **Puedes usar cualquier herramienta de IA para desarrollar** (Claude Code, Copilot, ChatGPT, Cursor, etc.). De hecho, lo alentamos.
+- **Si quieres compartir tu historial de chat con el modelo que usaste, suma bastante.** Nos ayuda a entender tu proceso de pensamiento y cómo interactúas con las herramientas. No es obligatorio, pero es un plus.
 - **No hace falta que sea perfecto.** Buen criterio > código impecable. Si algo te llevaría demasiado tiempo, documenta qué harías en el `ARCHITECTURE.md`.
 - **Tiempo estimado: ~2.5 horas.**.
 
@@ -140,8 +141,10 @@ curl http://localhost:8080/api/tasks/11111111-1111-1111-1111-111111111111 \
 
 ## Entrega
 
-1. Asegúrate de que todos tus cambios estén commiteados
-2. Verifica que existan: `REVIEW.md`, `ARCHITECTURE.md`, `docker-compose.yml`
+1. Haz un **fork** de este repositorio a tu cuenta de GitHub
+2. Trabaja sobre tu fork y asegúrate de que todos tus cambios estén commiteados
+3. Verifica que existan: `REVIEW.md`, `ARCHITECTURE.md`, `docker-compose.yml`
+4. Cuando hayas terminado, envíanos la confirmación con el link a tu fork para que podamos revisarlo
 
 ---
 
