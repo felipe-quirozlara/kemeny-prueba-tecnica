@@ -33,15 +33,28 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	include := r.URL.Query().Get("include")
 
-	query := "SELECT id, title, description, status, priority, category, summary, creator_id, assignee_id, due_date, estimated_hours, actual_hours, created_at, updated_at FROM tasks"
-	args := []interface{}{}
-
+	// Improved: Use JOIN to fetch tasks and tags in one query
+	var query string
+	var args []interface{}
 	if status != "" {
-		query += " WHERE status = $1"
+		query = `SELECT 
+			tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.category, tasks.summary, tasks.creator_id, tasks.assignee_id, tasks.due_date, tasks.estimated_hours, tasks.actual_hours, tasks.created_at, tasks.updated_at,
+			tags.id, tags.name, tags.color, tags.created_at
+		FROM tasks
+		LEFT JOIN task_tags ON tasks.id = task_tags.task_id
+		LEFT JOIN tags ON task_tags.tag_id = tags.id
+		WHERE tasks.status = $1
+		ORDER BY tasks.created_at DESC`
 		args = append(args, status)
+	} else {
+		query = `SELECT 
+			tasks.id, tasks.title, tasks.description, tasks.status, tasks.priority, tasks.category, tasks.summary, tasks.creator_id, tasks.assignee_id, tasks.due_date, tasks.estimated_hours, tasks.actual_hours, tasks.created_at, tasks.updated_at,
+			tags.id, tags.name, tags.color, tags.created_at
+		FROM tasks
+		LEFT JOIN task_tags ON tasks.id = task_tags.task_id
+		LEFT JOIN tags ON task_tags.tag_id = tags.id
+		ORDER BY tasks.created_at DESC`
 	}
-
-	query += " ORDER BY created_at DESC"
 
 	rows, err := db.Pool.Query(r.Context(), query, args...)
 	if err != nil {
@@ -50,20 +63,46 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	tasks := []model.Task{}
+	taskMap := make(map[string]*model.Task)
 	for rows.Next() {
-		var t model.Task
+		var (
+			t model.Task
+			tagID *string
+			tagName *string
+			tagColor *string
+			tagCreatedAt *time.Time
+		)
 		err := rows.Scan(
 			&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority,
 			&t.Category, &t.Summary, &t.CreatorID, &t.AssigneeID,
 			&t.DueDate, &t.EstimatedHours, &t.ActualHours,
 			&t.CreatedAt, &t.UpdatedAt,
+			&tagID, &tagName, &tagColor, &tagCreatedAt,
 		)
 		if err != nil {
-			log.Printf("error scanning task: %v", err)
+			log.Printf("error scanning task+tag: %v", err)
 			continue
 		}
-		tasks = append(tasks, t)
+		task, exists := taskMap[t.ID]
+		if !exists {
+			taskCopy := t
+			taskCopy.Tags = []model.Tag{}
+			taskMap[t.ID] = &taskCopy
+			task = &taskCopy
+		}
+		if tagID != nil && tagName != nil && tagColor != nil && tagCreatedAt != nil {
+			task.Tags = append(task.Tags, model.Tag{
+				ID:         *tagID,
+				Name:       *tagName,
+				Color:      *tagColor,
+				CreatedAt:  *tagCreatedAt,
+			})
+		}
+	}
+
+	tasks := make([]model.Task, 0, len(taskMap))
+	for _, t := range taskMap {
+		tasks = append(tasks, *t)
 	}
 
 	// Load assignee for each task
@@ -80,26 +119,6 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-	}
-
-	// Load tags for each task
-	for i, t := range tasks {
-		rows, err := db.Pool.Query(r.Context(),
-			`SELECT t.id, t.name, t.color, t.created_at
-			 FROM tags t
-			 INNER JOIN task_tags tt ON t.id = tt.tag_id
-			 WHERE tt.task_id = $1`, t.ID)
-		if err != nil {
-			continue
-		}
-		var tags []model.Tag
-		for rows.Next() {
-			var tag model.Tag
-			_ = rows.Scan(&tag.ID, &tag.Name, &tag.Color, &tag.CreatedAt)
-			tags = append(tags, tag)
-		}
-		rows.Close()
-		tasks[i].Tags = tags
 	}
 
 	w.Header().Set("Content-Type", "application/json")
