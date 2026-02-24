@@ -167,25 +167,25 @@ INSERT INTO edit_history (task_id, user_id, field_name, old_value, new_value) VA
     ('88888888-8888-8888-8888-888888888888', 'd4e5f6a7-b8c9-0123-defa-234567890123', 'status', 'in_progress', 'done');
 
 -- Tags
-INSERT INTO tags (id, name, color) VALUES
-    ('tag11111-1111-1111-1111-111111111111', 'backend', '#3B82F6'),
-    ('tag22222-2222-2222-2222-222222222222', 'frontend', '#8B5CF6'),
-    ('tag33333-3333-3333-3333-333333333333', 'bug', '#EF4444'),
-    ('tag44444-4444-4444-4444-444444444444', 'feature', '#10B981'),
-    ('tag55555-5555-5555-5555-555555555555', 'devops', '#F59E0B'),
-    ('tag66666-6666-6666-6666-666666666666', 'security', '#EC4899'),
-    ('tag77777-7777-7777-7777-777777777777', 'performance', '#06B6D4'),
-    ('tag88888-8888-8888-8888-888888888888', 'documentation', '#6B7280');
+INSERT INTO tags (name, color) VALUES
+    ('backend', '#3B82F6'),
+    ('frontend', '#8B5CF6'),
+    ('bug', '#EF4444'),
+    ('feature', '#10B981'),
+    ('devops', '#F59E0B'),
+    ('security', '#EC4899'),
+    ('performance', '#06B6D4'),
+    ('documentation', '#6B7280');
 
 -- Task Tags (some tasks already have manual tags)
 INSERT INTO task_tags (task_id, tag_id, assigned_by) VALUES
-    ('11111111-1111-1111-1111-111111111111', 'tag11111-1111-1111-1111-111111111111', 'manual'),
-    ('11111111-1111-1111-1111-111111111111', 'tag66666-6666-6666-6666-666666666666', 'manual'),
-    ('22222222-2222-2222-2222-222222222222', 'tag33333-3333-3333-3333-333333333333', 'manual'),
-    ('22222222-2222-2222-2222-222222222222', 'tag22222-2222-2222-2222-222222222222', 'manual'),
-    ('33333333-3333-3333-3333-333333333333', 'tag22222-2222-2222-2222-222222222222', 'manual'),
-    ('44444444-4444-4444-4444-444444444444', 'tag11111-1111-1111-1111-111111111111', 'manual'),
-    ('66666666-6666-6666-6666-666666666666', 'tag77777-7777-7777-7777-777777777777', 'manual'),
-    ('66666666-6666-6666-6666-666666666666', 'tag11111-1111-1111-1111-111111111111', 'manual'),
-    ('77777777-7777-7777-7777-777777777777', 'tag55555-5555-5555-5555-555555555555', 'manual'),
-    ('88888888-8888-8888-8888-888888888888', 'tag44444-4444-4444-4444-444444444444', 'manual');
+    ('11111111-1111-1111-1111-111111111111', (SELECT id FROM tags WHERE name='backend'), 'manual'),
+    ('11111111-1111-1111-1111-111111111111', (SELECT id FROM tags WHERE name='security'), 'manual'),
+    ('22222222-2222-2222-2222-222222222222', (SELECT id FROM tags WHERE name='bug'), 'manual'),
+    ('22222222-2222-2222-2222-222222222222', (SELECT id FROM tags WHERE name='frontend'), 'manual'),
+    ('33333333-3333-3333-3333-333333333333', (SELECT id FROM tags WHERE name='frontend'), 'manual'),
+    ('44444444-4444-4444-4444-444444444444', (SELECT id FROM tags WHERE name='backend'), 'manual'),
+    ('66666666-6666-6666-6666-666666666666', (SELECT id FROM tags WHERE name='performance'), 'manual'),
+    ('66666666-6666-6666-6666-666666666666', (SELECT id FROM tags WHERE name='backend'), 'manual'),
+    ('77777777-7777-7777-7777-777777777777', (SELECT id FROM tags WHERE name='devops'), 'manual'),
+    ('88888888-8888-8888-8888-888888888888', (SELECT id FROM tags WHERE name='feature'), 'manual');

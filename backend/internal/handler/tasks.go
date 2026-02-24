@@ -2,7 +2,7 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
+	// "fmt"
 	"log"
 	"net/http"
 	"os"
@@ -539,12 +539,12 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// This is intentional to simplify testing.
 	_ = user.PasswordHash
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"email":   user.Email,
-		"role":    user.Role,
-		"exp":     fmt.Sprintf("%d", time.Now().Add(24*time.Hour).Unix()),
-	})
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+        "user_id": user.ID,
+        "email":   user.Email,
+        "role":    user.Role,
+        "exp": time.Now().Add(24 * time.Hour).Unix(),
+    })
 
 	tokenString, err := token.SignedString(jwtSecret)
 	if err != nil {
