@@ -1,23 +1,24 @@
 package llm
 
+
 import (
     "context"
-    "encoding/json"
     "errors"
     "fmt"
-    "io"
-    "net/http"
     "os"
-    "time"
+    "strings"
+
+    "github.com/anthropics/anthropic-sdk-go"
+    "github.com/anthropics/anthropic-sdk-go/option"
 )
 
-// AnthropicClient is a minimal HTTP client for Anthropic completions.
+// AnthropicClient uses the official Anthropics Go SDK.
 type AnthropicClient struct {
-    apiKey     string
-    httpClient *http.Client
-    model      string
+    client anthropic.Client
+    model  string
 }
 
+// NewAnthropicClient returns a configured Anthropics client or error if API key missing.
 func NewAnthropicClient() (*AnthropicClient, error) {
     key := os.Getenv("ANTHROPIC_API_KEY")
     if key == "" {
@@ -27,52 +28,44 @@ func NewAnthropicClient() (*AnthropicClient, error) {
     if model == "" {
         model = "claude-2.1"
     }
-    return &AnthropicClient{
-        apiKey: key,
-        httpClient: &http.Client{ Timeout: 15 * time.Second },
-        model: model,
-    }, nil
+    cli := anthropic.NewClient(option.WithAPIKey(key))
+    return &AnthropicClient{client: cli, model: model}, nil
 }
 
 func (c *AnthropicClient) ClassifyTask(ctx context.Context, title, description string) (*TaskClassification, error) {
     prompt := buildPrompt(title, description)
-    reqBody := map[string]interface{}{
-        "model": c.model,
-        "prompt": prompt,
-        "max_tokens": 300,
-        "temperature": 0.0,
-    }
-    b, err := json.Marshal(reqBody)
-    if err != nil { return nil, err }
 
-    req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/complete", io.NopCloser(bytesReader(b)))
-    if err != nil { return nil, err }
-    req.Header.Set("x-api-key", c.apiKey)
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := c.httpClient.Do(req)
-    if err != nil { return nil, err }
-    defer resp.Body.Close()
-
-    if resp.StatusCode >= 400 {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("anthropic error: status=%d body=%s", resp.StatusCode, string(body))
-    }
-
-    var respBody struct{
-        Completion string `json:"completion"`
-    }
-    bodyBytes, err := io.ReadAll(resp.Body)
+    msg, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
+        MaxTokens: 300,
+        Messages: []anthropic.MessageParam{
+            anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+        },
+        Model: anthropic.Model(c.model),
+    })
     if err != nil {
-        return nil, err
+        return nil, fmt.Errorf("anthropic sdk error: %w", err)
     }
-    if err := json.Unmarshal(bodyBytes, &respBody); err != nil {
-        return nil, err
+    out := contentToString(msg.Content)
+    if strings.TrimSpace(out) == "" {
+        return nil, errors.New("empty response from anthropic")
     }
 
     var tc TaskClassification
-    if err := parseJSONFromString(respBody.Completion, &tc); err != nil {
+    if err := parseJSONFromString(out, &tc); err != nil {
         return nil, fmt.Errorf("failed parsing anthropic output: %w", err)
     }
     return &tc, nil
+}
+
+// contentToString converts the SDK's ContentBlockUnion slice into a plain string
+// by concatenating each element's default string representation. This is a
+// conservative approach that extracts visible text regardless of the union
+// internals; if you prefer a stricter extraction (e.g. only text blocks) we
+// can refine it after inspecting the SDK types.
+func contentToString(content []anthropic.ContentBlockUnion) string {
+    var parts []string
+    for _, cb := range content {
+        parts = append(parts, fmt.Sprintf("%v", cb))
+    }
+    return strings.Join(parts, " ")
 }
