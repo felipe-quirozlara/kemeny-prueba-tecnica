@@ -111,6 +111,32 @@ npm install
 NEXT_PUBLIC_API_URL=http://localhost:8080 npm run dev
 ```
 
+## AI Integration Environment Variables
+
+The backend can call OpenAI or Anthropic to classify tasks. Provide the following environment variables to enable a provider:
+
+- `OPENAI_API_KEY` — your OpenAI API key (optional). If set and `LLM_PROVIDER` is not specified, OpenAI will be used by default.
+- `OPENAI_MODEL` — optional, model name (default: `gpt-3.5-turbo`).
+- `ANTHROPIC_API_KEY` — your Anthropic API key (optional).
+- `ANTHROPIC_MODEL` — optional, model name (default: `claude-2.1`).
+- `LLM_PROVIDER` — optional override to choose provider explicitly: `openai`, `anthropic`, or `mock`.
+
+Behavior:
+- If `LLM_PROVIDER` is set, the server tries to use that provider (and requires the corresponding API key).
+- If `LLM_PROVIDER` is not set, the server prefers OpenAI if `OPENAI_API_KEY` is present, otherwise uses Anthropic if `ANTHROPIC_API_KEY` is present. If no keys are configured, the built-in mock LLM is used.
+
+Example using OpenAI (Linux/macOS):
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export LLM_PROVIDER=openai
+go run cmd/server/main.go
+```
+
+Notes:
+- Keys must be kept secret and not committed to source control. Use your environment/secret manager in CI and production.
+- Classification calls are rate-limited by provider quotas; consider adding rate limiting or a feature flag for the endpoint in production to control costs.
+
 ### API de ejemplo
 
 ```bash

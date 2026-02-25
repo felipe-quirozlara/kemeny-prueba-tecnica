@@ -23,20 +23,22 @@ func (m *MockClient) ClassifyTask(ctx context.Context, title, description string
 		Summary:  "Task: " + title,
 	}
 
-	// Determine category based on keywords
-	switch {
-	case containsAny(combined, "bug", "fix", "error", "crash", "broken", "fail"):
-		classification.Category = "bug"
-		classification.Tags = append(classification.Tags, "bug")
-	case containsAny(combined, "refactor", "clean", "improve", "optimize", "migrate"):
-		classification.Category = "improvement"
-		classification.Tags = append(classification.Tags, "improvement")
-	case containsAny(combined, "research", "investigate", "explore", "spike", "poc"):
-		classification.Category = "research"
-		classification.Tags = append(classification.Tags, "research")
-	default:
-		classification.Tags = append(classification.Tags, "feature")
-	}
+    // Determine category based on keywords. Check for improvements first so
+    // "refactor"/"clean" override incidental words like "error" in the
+    // same title/description.
+    switch {
+    case containsAny(combined, "refactor", "clean", "improve", "optimize", "migrate"):
+        classification.Category = "improvement"
+        classification.Tags = append(classification.Tags, "improvement")
+    case containsAny(combined, "bug", "fix", "error", "crash", "broken", "fail"):
+        classification.Category = "bug"
+        classification.Tags = append(classification.Tags, "bug")
+    case containsAny(combined, "research", "investigate", "explore", "spike", "poc"):
+        classification.Category = "research"
+        classification.Tags = append(classification.Tags, "research")
+    default:
+        classification.Tags = append(classification.Tags, "feature")
+    }
 
 	// Determine priority based on keywords
 	switch {

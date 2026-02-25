@@ -5,18 +5,17 @@ import (
     "encoding/json"
     "errors"
     "fmt"
-    "io"
-    "io/ioutil"
-    "net/http"
     "os"
-    "time"
+
+    "github.com/openai/openai-go/v3"
+    "github.com/openai/openai-go/v3/option"
+    "github.com/openai/openai-go/v3/responses"
 )
 
-// OpenAIClient uses the OpenAI REST Chat Completions API.
+// OpenAIClient uses the official openai-go SDK.
 type OpenAIClient struct {
-    apiKey     string
-    httpClient *http.Client
-    model      string
+    client openai.Client
+    model  string
 }
 
 // NewOpenAIClient returns a configured OpenAI client or error if API key missing.
@@ -30,76 +29,30 @@ func NewOpenAIClient() (*OpenAIClient, error) {
     if model == "" {
         model = "gpt-3.5-turbo"
     }
-    return &OpenAIClient{
-        apiKey: key,
-        httpClient: &http.Client{
-            Timeout: 15 * time.Second,
-        },
-        model: model,
-    }, nil
+    cli := openai.NewClient(option.WithAPIKey(key))
+    return &OpenAIClient{client: cli, model: model}, nil
 }
 
 func (c *OpenAIClient) ClassifyTask(ctx context.Context, title, description string) (*TaskClassification, error) {
     prompt := buildPrompt(title, description)
 
-    reqBody := map[string]interface{}{
-        "model": c.model,
-        "messages": []map[string]string{
-            {"role": "system", "content": "You are a helpful task classifier. Respond with JSON only."},
-            {"role": "user", "content": prompt},
-        },
-        "max_tokens": 300,
-        "temperature": 0.0,
-    }
-
-    b, err := json.Marshal(reqBody)
+    resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+        Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)},
+        Model: c.model,
+    })
     if err != nil {
-        return nil, err
+        return nil, fmt.Errorf("openai sdk error: %w", err)
     }
 
-    req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", io.NopCloser(bytesReader(b)))
-    if err != nil {
-        return nil, err
-    }
-    req.Header.Set("Authorization", "Bearer "+c.apiKey)
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := c.httpClient.Do(req)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode >= 400 {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("openai error: status=%d body=%s", resp.StatusCode, string(body))
+    out := resp.OutputText()
+    if out == "" {
+        return nil, errors.New("empty response from openai")
     }
 
-    var respBody struct {
-        Choices []struct{
-            Message struct{
-                Content string `json:"content"`
-            } `json:"message"`
-        } `json:"choices"`
-    }
-    bodyBytes, err := ioutil.ReadAll(resp.Body)
-    if err != nil {
-        return nil, err
-    }
-    if err := json.Unmarshal(bodyBytes, &respBody); err != nil {
-        return nil, err
-    }
-    if len(respBody.Choices) == 0 {
-        return nil, errors.New("no choices from openai")
-    }
-
-    raw := respBody.Choices[0].Message.Content
-    // Try to unmarshal the content as JSON into TaskClassification
     var tc TaskClassification
-    if err := parseJSONFromString(raw, &tc); err != nil {
+    if err := parseJSONFromString(out, &tc); err != nil {
         return nil, fmt.Errorf("failed parsing openai output: %w", err)
     }
-
     return &tc, nil
 }
 
@@ -137,15 +90,4 @@ func parseJSONFromString(s string, v interface{}) error {
     }
     sub := s[start:end+1]
     return json.Unmarshal([]byte(sub), v)
-}
-
-// bytesReader returns an io.Reader from bytes without importing bytes at top-level to keep file simple
-func bytesReader(b []byte) *reader { return &reader{b:b} }
-
-type reader struct{ b []byte; i int }
-func (r *reader) Read(p []byte) (n int, err error) {
-    if r.i >= len(r.b) { return 0, io.EOF }
-    n = copy(p, r.b[r.i:])
-    r.i += n
-    return n, nil
 }
