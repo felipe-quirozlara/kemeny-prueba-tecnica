@@ -4,11 +4,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 class ApiClient {
   private token: string | null = null;
+  private user: any | null = null;
 
-  setToken(token: string) {
+  setToken(token: string | null) {
     this.token = token;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('auth_token', token);
+      if (token) {
+        localStorage.setItem('auth_token', token);
+      } else {
+        localStorage.removeItem('auth_token');
+      }
     }
   }
 
@@ -18,6 +23,38 @@ class ApiClient {
       this.token = localStorage.getItem('auth_token');
     }
     return this.token;
+  }
+
+  // User helpers
+  setUser(user: any | null) {
+    this.user = user;
+    if (typeof window !== 'undefined') {
+      if (user) {
+        localStorage.setItem('auth_user', JSON.stringify(user));
+      } else {
+        localStorage.removeItem('auth_user');
+      }
+    }
+  }
+
+  getUser(): any | null {
+    if (this.user) return this.user;
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem('auth_user');
+      if (raw) {
+        try {
+          this.user = JSON.parse(raw);
+        } catch (e) {
+          this.user = null;
+        }
+      }
+    }
+    return this.user;
+  }
+
+  logout() {
+    this.setToken(null);
+    this.setUser(null);
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -55,6 +92,7 @@ class ApiClient {
       body: JSON.stringify({ email, password }),
     });
     this.setToken(data.token);
+    this.setUser(data.user);
     return data;
   }
 

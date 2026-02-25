@@ -25,6 +25,7 @@ export default function RootLayout({
           <div style={{ display: 'flex', gap: '1.5rem' }}>
             <a href="/" style={{ color: '#d1d5db', textDecoration: 'none' }}>Dashboard</a>
             <a href="/tasks" style={{ color: '#d1d5db', textDecoration: 'none' }}>Tasks</a>
+            <a href="/login" style={{ color: '#d1d5db', textDecoration: 'none' }}>Login</a>
           </div>
         </nav>
         <main style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
