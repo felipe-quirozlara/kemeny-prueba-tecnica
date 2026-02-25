@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"context"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
@@ -15,10 +16,17 @@ import (
 
 	"github.com/KemenyStudio/task-manager/internal/db"
 	"github.com/KemenyStudio/task-manager/internal/middleware"
+	"github.com/KemenyStudio/task-manager/internal/llm"
 	"github.com/KemenyStudio/task-manager/internal/model"
 )
 
 var jwtSecret []byte
+var llmClient llm.LLMClient
+
+// SetLLMClient allows wiring a chosen LLM implementation at startup.
+func SetLLMClient(c llm.LLMClient) {
+    llmClient = c
+}
 
 func init() {
 	secret := os.Getenv("JWT_SECRET")
@@ -188,6 +196,142 @@ func GetTask(w http.ResponseWriter, r *http.Request) {
     if err := JSON(w, http.StatusOK, t); err != nil {
         Error(w, r, http.StatusInternalServerError, "failed to encode task", err, 0)
     }
+}
+
+// ClassifyTask calls the configured LLM to classify a task and persists results.
+func ClassifyTask(w http.ResponseWriter, r *http.Request) {
+    if llmClient == nil {
+        Error(w, r, http.StatusInternalServerError, "LLM client not configured", nil, 0)
+        return
+    }
+
+    taskID := chi.URLParam(r, "id")
+    userID := middleware.GetUserID(r)
+    if userID == "" {
+        Error(w, r, http.StatusUnauthorized, "unauthorized", nil, 0)
+        return
+    }
+
+    // Fetch task
+    var t model.Task
+    err := db.Pool.QueryRow(r.Context(),
+        `SELECT id, title, COALESCE(description, '') FROM tasks WHERE id = $1`, taskID,
+    ).Scan(&t.ID, &t.Title, &t.Description)
+    if err == pgx.ErrNoRows {
+        Error(w, r, http.StatusNotFound, "task not found", nil, 0)
+        return
+    }
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to get task", err, 0)
+        return
+    }
+
+    desc := ""
+    if t.Description != nil {
+        desc = *t.Description
+    }
+
+    // Call LLM with timeout
+    ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+    defer cancel()
+
+    classification, err := llmClient.ClassifyTask(ctx, t.Title, desc)
+    if err != nil {
+        Error(w, r, http.StatusBadGateway, "llm classification failed", err, 0)
+        return
+    }
+
+    // Normalize and validate
+    // priority and category allowed values
+    validPriorities := map[string]bool{"low":true, "medium":true, "high":true, "urgent":true}
+    if !validPriorities[classification.Priority] {
+        // fallback
+        classification.Priority = "medium"
+    }
+    validCategories := map[string]bool{"bug":true, "feature":true, "improvement":true, "research":true}
+    if !validCategories[classification.Category] {
+        classification.Category = "feature"
+    }
+    if len(classification.Summary) > 140 {
+        classification.Summary = classification.Summary[:137] + "..."
+    }
+    // sanitize tags
+    tags := []string{}
+    for i, tag := range classification.Tags {
+        if i>=8 { break }
+        t2 := strings.TrimSpace(strings.ToLower(tag))
+        t2 = strings.ReplaceAll(t2, " ", "-")
+        if t2=="" { continue }
+        tags = append(tags, t2)
+    }
+
+    // Persist in transaction
+    tx, err := db.Pool.Begin(r.Context())
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to begin tx", err, 0)
+        return
+    }
+    defer tx.Rollback(r.Context())
+
+    // Update task
+    _, err = tx.Exec(r.Context(), `UPDATE tasks SET category=$1, priority=$2, summary=$3, updated_at=NOW() WHERE id=$4`,
+        classification.Category, classification.Priority, classification.Summary, taskID)
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to update task", err, 0)
+        return
+    }
+
+    // Ensure tags exist and collect ids
+    tagIDs := []string{}
+    for _, name := range tags {
+        // insert tag if not exists
+        _, _ = tx.Exec(r.Context(), `INSERT INTO tags (name, color) VALUES ($1, '#6B7280') ON CONFLICT (name) DO NOTHING`, name)
+        var id string
+        err := tx.QueryRow(r.Context(), `SELECT id FROM tags WHERE name=$1`, name).Scan(&id)
+        if err != nil {
+            Error(w, r, http.StatusInternalServerError, "failed to get tag id", err, 0)
+            return
+        }
+        tagIDs = append(tagIDs, id)
+    }
+
+    // Remove previous AI-assigned tags for this task
+    _, err = tx.Exec(r.Context(), `DELETE FROM task_tags WHERE task_id=$1 AND assigned_by='ai'`, taskID)
+    if err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to delete old task_tags", err, 0)
+        return
+    }
+
+    // Insert new task_tags
+    for _, tid := range tagIDs {
+        _, err := tx.Exec(r.Context(), `INSERT INTO task_tags (task_id, tag_id, assigned_by) VALUES ($1,$2,'ai') ON CONFLICT DO NOTHING`, taskID, tid)
+        if err != nil {
+            Error(w, r, http.StatusInternalServerError, "failed to insert task_tag", err, 0)
+            return
+        }
+    }
+
+    // Record edit history for fields that changed
+    // Fetch old values to compare
+    var oldPriority, oldCategory, oldSummary *string
+    _ = tx.QueryRow(r.Context(), `SELECT priority, category, summary FROM tasks WHERE id=$1`, taskID).Scan(&oldPriority, &oldCategory, &oldSummary)
+    if oldPriority == nil || *oldPriority != classification.Priority {
+        _, _ = tx.Exec(r.Context(), `INSERT INTO edit_history (task_id, user_id, field_name, old_value, new_value) VALUES ($1,$2,'priority',$3,$4)`, taskID, userID, oldPriority, classification.Priority+" (AI suggestion)")
+    }
+    if oldCategory == nil || *oldCategory != classification.Category {
+        _, _ = tx.Exec(r.Context(), `INSERT INTO edit_history (task_id, user_id, field_name, old_value, new_value) VALUES ($1,$2,'category',$3,$4)`, taskID, userID, oldCategory, classification.Category+" (AI suggestion)")
+    }
+    if oldSummary == nil || *oldSummary != classification.Summary {
+        _, _ = tx.Exec(r.Context(), `INSERT INTO edit_history (task_id, user_id, field_name, old_value, new_value) VALUES ($1,$2,'summary',$3,$4)`, taskID, userID, oldSummary, classification.Summary+" (AI suggestion)")
+    }
+
+    if err := tx.Commit(r.Context()); err != nil {
+        Error(w, r, http.StatusInternalServerError, "failed to commit tx", err, 0)
+        return
+    }
+
+    // Return updated task (reuse GetTask logic by calling DB again)
+    GetTask(w, r)
 }
 
 // CreateTask creates a new task.

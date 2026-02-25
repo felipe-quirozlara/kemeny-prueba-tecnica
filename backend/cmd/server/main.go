@@ -12,6 +12,7 @@ import (
 
 	"github.com/KemenyStudio/task-manager/internal/db"
 	"github.com/KemenyStudio/task-manager/internal/handler"
+	"github.com/KemenyStudio/task-manager/internal/llm"
 	"github.com/KemenyStudio/task-manager/internal/middleware"
 )
 
@@ -51,8 +52,8 @@ func main() {
 	r.Post("/api/auth/login", handler.LoginHandler)
 
 	// Protected routes
-	r.Route("/api", func(r chi.Router) {
-		r.Use(middleware.AuthMiddleware)
+	 r.Route("/api", func(r chi.Router) {
+	 	r.Use(middleware.AuthMiddleware)
 
 		// Tasks CRUD
 		r.Get("/tasks", handler.ListTasks)
@@ -65,9 +66,41 @@ func main() {
 		r.Get("/tasks/{id}/history", handler.GetTaskHistory)
 		r.Get("/tasks/search", handler.SearchTasks)
 
+		// AI classification
+		r.Post("/tasks/{id}/classify", handler.ClassifyTask)
+
 		// Dashboard
 		r.Get("/dashboard/stats", handler.GetDashboardStats)
 	})
+
+    // Wire LLM client after routes so handler.SetLLMClient is called before server start
+    var selected llm.LLMClient
+    // Provider selection logic: prefer LLM_PROVIDER if set, else detect available keys
+    provider := os.Getenv("LLM_PROVIDER")
+    openaiKey := os.Getenv("OPENAI_API_KEY")
+    anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+    switch provider {
+    case "openai":
+        if openaiKey != "" {
+            if c, err := llm.NewOpenAIClient(); err == nil { selected = c }
+        }
+    case "anthropic":
+        if anthropicKey != "" {
+            if c, err := llm.NewAnthropicClient(); err == nil { selected = c }
+        }
+    default:
+        // auto-detect: prefer OpenAI if key present
+        if openaiKey != "" {
+            if c, err := llm.NewOpenAIClient(); err == nil { selected = c }
+        } else if anthropicKey != "" {
+            if c, err := llm.NewAnthropicClient(); err == nil { selected = c }
+        }
+    }
+    if selected == nil {
+        // fallback to mock
+        selected = llm.NewMockClient()
+    }
+    handler.SetLLMClient(selected)
 
 	port := os.Getenv("PORT")
 	if port == "" {
